@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 #[repr(u8)]
 pub enum MouseButton {
@@ -14,7 +16,7 @@ pub struct Touch {
     pub y: f32,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Serialize, Deserialize)]
 #[repr(u16)]
 /// These keycode values are based off of X11's `keysymdef.h`.
 /// Missing keycodes from that list are given the prefix 0x01.

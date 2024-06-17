@@ -57,3 +57,5 @@ incremental = false
 rpath = false
 codegen-units = 1
 strip = true
+[dependencies]
+serde = {version = "1.0.197", features = ["derive"]}
