@@ -5,7 +5,8 @@ use crate::native::ios;
 pub enum Error {
     IOError(std::io::Error),
     DownloadFailed,
-    AndroidAssetLoadingError,
+	AndroidAssetLoadingError,
+	AndroidInternalStorageError,
     /// MainBundle pathForResource returned null
     IOSAssetNoSuchFile,
     /// NSData dataWithContentsOfFile or data.bytes are null
@@ -29,12 +30,13 @@ impl From<std::io::Error> for Error {
 pub type Response = Result<Vec<u8>, Error>;
 
 /// Filesystem path on desktops or HTTP URL in WASM
+/// Used for loading static files like assets
 pub fn load_file<F: Fn(Response) + 'static>(path: &str, on_loaded: F) {
     #[cfg(target_arch = "wasm32")]
     wasm::load_file(path, on_loaded);
 
     #[cfg(target_os = "android")]
-    load_file_android(path, on_loaded);
+    load_asset_android(path, on_loaded);
 
     #[cfg(target_os = "ios")]
     ios::load_file(path, on_loaded);
@@ -43,8 +45,29 @@ pub fn load_file<F: Fn(Response) + 'static>(path: &str, on_loaded: F) {
     load_file_desktop(path, on_loaded);
 }
 
+/// Assets are not writable
+pub fn save_file<F: Fn(bool) + 'static>(path: &str, data: &[u8], on_saved: F) {
+	#[cfg(target_os = "android")]
+	write_internal_storage_android(path, data, on_saved);
+	
+	#[cfg(not(target_os = "android"))]
+	unimplemented!("save_file is not implemented for this platform");
+}
+
+
+/// Used for internal storage on android, use load_file() instead for assets.
+pub fn read_file<F: Fn(Response) + 'static>(path: &str, on_loaded: F) {
+	#[cfg(target_os = "android")]
+	read_internal_storage_android(path, on_loaded);
+	
+	#[cfg(not(target_os = "android"))]
+	unimplemented!("read_file is not implemented for this platform");
+}
+
+
+
 #[cfg(target_os = "android")]
-fn load_file_android<F: Fn(Response)>(path: &str, on_loaded: F) {
+fn load_asset_android<F: Fn(Response)>(path: &str, on_loaded: F) {
     fn load_file_sync(path: &str) -> Response {
         use crate::native;
 
@@ -68,6 +91,49 @@ fn load_file_android<F: Fn(Response)>(path: &str, on_loaded: F) {
 
     on_loaded(response);
 }
+
+#[cfg(target_os = "android")]
+fn read_internal_storage_android<F: Fn(Response)>(path: &str, on_loaded: F) {
+	fn read_file_sync(path: &str) -> Response {
+		use crate::native;
+		
+		let filename = std::ffi::CString::new(path).unwrap();
+		
+		let mut data: native::android_asset = unsafe { std::mem::zeroed() };
+		
+		unsafe { native::android::read_internal_storage(filename.as_ptr(), &mut data as _) };
+		
+		if data.content.is_null() == false {
+			let slice =
+				unsafe { std::slice::from_raw_parts(data.content, data.content_length as _) };
+			let response = slice.iter().map(|c| *c as _).collect::<Vec<_>>();
+			Ok(response)
+		} else {
+			Err(Error::AndroidInternalStorageError)
+		}
+	}
+	
+	let response = read_file_sync(path);
+	
+	on_loaded(response);
+}
+
+#[cfg(target_os = "android")]
+fn write_internal_storage_android<F: Fn(bool)>(path: &str, data: &[u8], on_written: F) {
+	fn write_file_sync(path: &str, data: &[u8]) -> bool {
+		use crate::native;
+		
+		let filename = std::ffi::CString::new(path).unwrap();
+		
+		unsafe { native::android::write_internal_storage(filename.as_ptr(), data.as_ptr(), data.len()) }
+	}
+	
+	let success = write_file_sync(path, data);
+	
+	on_written(success);
+}
+
+
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {

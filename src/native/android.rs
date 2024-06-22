@@ -652,7 +652,7 @@ pub(crate) unsafe fn load_asset(filepath: *const ::std::os::raw::c_char, out: *m
     let get_object_class = (**env).GetObjectClass.unwrap();
     let call_object_method = (**env).CallObjectMethod.unwrap();
 
-    let mid = (get_method_id)(
+    let mid = get_method_id(
         env,
         get_object_class(env, ACTIVITY),
         b"getAssets\0".as_ptr() as _,
@@ -673,4 +673,102 @@ pub(crate) unsafe fn load_asset(filepath: *const ::std::os::raw::c_char, out: *m
         (*out).content_length = length as _;
         (*out).content = buffer as _;
     }
+}
+
+pub(crate) unsafe fn read_internal_storage(filepath: *const ::std::os::raw::c_char, out: *mut android_asset) {
+	use std::ptr;
+	use std::ffi::CStr;
+	
+	let env = attach_jni_env();
+	
+	let get_method_id = (**env).GetMethodID.unwrap();
+	let get_object_class = (**env).GetObjectClass.unwrap();
+	let call_object_method = (**env).CallObjectMethod.unwrap();
+	let new_string_utf = (**env).NewStringUTF.unwrap();
+	let get_string_utf_chars = (**env).GetStringUTFChars.unwrap();
+	
+	let mid_get_files_dir = get_method_id(
+		env,
+		get_object_class(env, ACTIVITY),
+		b"getFilesDir\0".as_ptr() as _,
+		b"()Ljava/io/File;\0".as_ptr() as _,
+	);
+	let file_dir = call_object_method(env, ACTIVITY, mid_get_files_dir);
+	
+	let mid_get_absolute_path = get_method_id(
+		env,
+		get_object_class(env, file_dir),
+		b"getAbsolutePath\0".as_ptr() as _,
+		b"()Ljava/lang/String;\0".as_ptr() as _,
+	);
+	let path_obj = call_object_method(env, file_dir, mid_get_absolute_path);
+	let path_cstr = get_string_utf_chars(env, path_obj, ptr::null_mut());
+	
+	let mut path = CStr::from_ptr(path_cstr).to_string_lossy().into_owned();
+	path.push('/');
+	path.push_str(CStr::from_ptr(filepath).to_str().unwrap());
+	
+	let file = libc::fopen(path.as_ptr(), b"rb\0".as_ptr());
+	if file.is_null() {
+		return;
+	}
+	
+	libc::fseek(file, 0, libc::SEEK_END);
+	let length = libc::ftell(file);
+	libc::fseek(file, 0, libc::SEEK_SET);
+	
+	let buffer = libc::malloc(length as _);
+	if libc::fread(buffer, 1, length as _, file) > 0 {
+		libc::fclose(file);
+		
+		(*out).content_length = length as _;
+		(*out).content = buffer as _;
+	} else {
+		libc::fclose(file);
+		libc::free(buffer);
+	}
+}
+
+pub(crate) unsafe fn write_internal_storage(filepath: *const ::std::os::raw::c_char, data: *const u8, length: usize) -> bool {
+	use std::ptr;
+	use std::ffi::CStr;
+	
+	let env = attach_jni_env();
+	
+	let get_method_id = (**env).GetMethodID.unwrap();
+	let get_object_class = (**env).GetObjectClass.unwrap();
+	let call_object_method = (**env).CallObjectMethod.unwrap();
+	let new_string_utf = (**env).NewStringUTF.unwrap();
+	let get_string_utf_chars = (**env).GetStringUTFChars.unwrap();
+	
+	let mid_get_files_dir = get_method_id(
+		env,
+		get_object_class(env, ACTIVITY),
+		b"getFilesDir\0".as_ptr() as _,
+		b"()Ljava/io/File;\0".as_ptr() as _,
+	);
+	let file_dir = call_object_method(env, ACTIVITY, mid_get_files_dir);
+	
+	let mid_get_absolute_path = get_method_id(
+		env,
+		get_object_class(env, file_dir),
+		b"getAbsolutePath\0".as_ptr() as _,
+		b"()Ljava/lang/String;\0".as_ptr() as _,
+	);
+	let path_obj = call_object_method(env, file_dir, mid_get_absolute_path);
+	let path_cstr = get_string_utf_chars(env, path_obj, ptr::null_mut());
+	
+	let mut path = CStr::from_ptr(path_cstr).to_string_lossy().into_owned();
+	path.push('/');
+	path.push_str(CStr::from_ptr(filepath).to_str().unwrap());
+	
+	let file = libc::fopen(path.as_ptr(), b"wb\0".as_ptr());
+	if file.is_null() {
+		return false;
+	}
+	
+	let written = libc::fwrite(data as *const libc::c_void, 1, length, file);
+	libc::fclose(file);
+	
+	written == length
 }
