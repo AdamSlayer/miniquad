@@ -730,8 +730,10 @@ pub(crate) unsafe fn read_internal_storage(filepath: *const ::std::os::raw::c_ch
 }
 
 pub(crate) unsafe fn write_internal_storage(filepath: *const ::std::os::raw::c_char, data: *const u8, length: usize) -> bool {
+	use std::ffi::CString;
 	use std::ptr;
 	use std::ffi::CStr;
+	use libc::{fopen, fwrite, fclose, mkdir};
 	
 	let env = attach_jni_env();
 	
@@ -741,6 +743,7 @@ pub(crate) unsafe fn write_internal_storage(filepath: *const ::std::os::raw::c_c
 	let new_string_utf = (**env).NewStringUTF.unwrap();
 	let get_string_utf_chars = (**env).GetStringUTFChars.unwrap();
 	
+	// Get the files directory path
 	let mid_get_files_dir = get_method_id(
 		env,
 		get_object_class(env, ACTIVITY),
@@ -760,15 +763,25 @@ pub(crate) unsafe fn write_internal_storage(filepath: *const ::std::os::raw::c_c
 	
 	let mut path = CStr::from_ptr(path_cstr).to_string_lossy().into_owned();
 	path.push('/');
-	path.push_str(CStr::from_ptr(filepath).to_str().unwrap());
 	
-	let file = libc::fopen(path.as_ptr(), b"wb\0".as_ptr());
+	// Convert the filepath to a Rust string
+	let filepath_str = CStr::from_ptr(filepath).to_str().unwrap();
+	path.push_str(filepath_str);
+	
+	// Ensure directory structure exists
+	let directory_path = path.rsplitn(2, '/').collect::<Vec<&str>>()[1];
+	let directory_path_cstr = CString::new(directory_path).unwrap();
+	mkdir(directory_path_cstr.as_ptr(), 0o777); // 0o777 is the permissions flag
+	
+	// Open the file and write the data
+	let file = fopen(path.as_ptr(), b"wb\0".as_ptr());
 	if file.is_null() {
 		return false;
 	}
 	
-	let written = libc::fwrite(data as *const libc::c_void, 1, length, file);
-	libc::fclose(file);
+	let written = fwrite(data as *const libc::c_void, 1, length, file);
+	fclose(file);
 	
 	written == length
 }
+
